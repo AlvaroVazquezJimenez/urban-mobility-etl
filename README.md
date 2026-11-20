@@ -1,5 +1,16 @@
 # urban-mobility-etl
 
+![tests](https://github.com/TU_USUARIO/urban-mobility-etl/actions/workflows/tests.yml/badge.svg)
+
+**English summary:** Personal learning project that builds an end-to-end ETL pipeline
+on **synthetic** urban air-quality and traffic data. Raw JSON (with intentionally
+injected errors: duplicates, nulls, mixed date formats, outliers) is ingested into
+MongoDB (raw layer), cleaned and validated with Python/pandas, and loaded
+idempotently into PostgreSQL using `INSERT ... ON CONFLICT DO UPDATE`.
+Analytical SQL (CTEs, window functions) runs on top. Local setup with Docker Compose;
+cleaning logic covered by pytest.
+**Quick start:** see "Cómo ejecutarlo" below.
+
 Pipeline ETL de práctica para datos sintéticos de **calidad del aire y tráfico urbano**:
 ingesta en MongoDB (zona raw), limpieza y validación con pandas, carga idempotente en
 PostgreSQL (UPSERT) y consultas analíticas en SQL.
@@ -34,8 +45,7 @@ tests/      test_transform.py
 # 1. Entorno
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
-
+cp .env.example .env        # Windows: copy .env.example .env
 # 2. Bases de datos locales
 docker compose up -d        # espera unos segundos a que arranquen
 
@@ -47,6 +57,8 @@ python -m src.transform_load_postgres   # MongoDB -> limpieza -> PostgreSQL
 # 4. Consultas analíticas
 docker compose exec -T postgres psql -U postgres -d urban_mobility < sql/analytics_queries.sql
 ```
+> **Nota:** el contenedor de PostgreSQL se expone en el puerto **5433** (no en el 5432)
+> para no chocar con un PostgreSQL instalado localmente. El `.env.example` ya lo refleja.
 
 ## Cómo probarlo
 
@@ -61,6 +73,47 @@ python -m src.extract_load_mongo        # 2ª vez: "Nuevos: 0"
 python -m src.transform_load_postgres   # 2ª vez: inserted=0, updated=0, unchanged=N
 docker compose exec mongo mongosh urban_mobility --eval "db.raw_readings.countDocuments()"
 docker compose exec postgres psql -U postgres -d urban_mobility -c "SELECT COUNT(*) FROM fact_reading;"
+```
+
+## Resultados de ejemplo
+
+Ejecución real con los datos sintéticos por defecto (`--days 14 --seed 42`).
+
+**Resumen de limpieza** (2848 registros crudos, incluidos duplicados y errores):
+```text
+{'rows_raw': 2848, 'values_nulled_out_of_range': 163, 'rows_rejected': 37,
+ 'duplicates_removed': 158, 'rows_clean': 2653}
+```
+Motivos de rechazo: 22 por fecha inválida y 15 por `station_id` ausente
+(guardadas en `data/processed/rejected_readings.csv`).
+
+**Idempotencia.** Segunda ejecución de `transform_load_postgres` sin cambiar los datos
+(no inserta ni modifica nada):
+```text
+ dim_station  -> {'inserted': 0, 'updated': 0, 'unchanged': 8}
+  fact_reading -> {'inserted': 0, 'updated': 0, 'unchanged': 2653}
+```
+
+**Ranking de estaciones por NO2 medio:**
+```text
+    station_name    |  district   | avg_no2 | rank_city
+--------------------+-------------+---------+-----------
+ Puerta del Sol     | Centro      |   45.62 |         1
+ Cuatro Caminos     | Tetuán      |   43.37 |         2
+ Plaza Mayor        | Centro      |   41.10 |         3
+ Nuevos Ministerios | Chamartín   |   40.04 |         4
+ Calle Serrano      | Salamanca   |   38.97 |         5
+ Avenida Oporto     | Carabanchel |   37.31 |         6
+ Paseo Delicias     | Arganzuela  |   34.42 |         7
+ Parque Retiro Sur  | Salamanca   |   21.47 |         8
+```
+
+**Hora punta vs. resto del día:**
+```text
+    period     | n_readings | avg_traffic | avg_no2 | corr_traffic_no2
+---------------+------------+-------------+---------+------------------
+ Hora punta    |        663 |        1385 |   48.93 |            0.792
+ Resto del dia |       1990 |         685 |   34.02 |            0.859
 ```
 
 ## Reglas de calidad de datos
