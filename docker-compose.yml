@@ -1,0 +1,24 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: urban-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  postgres:
+    image: postgres:16
+    container_name: urban-postgres
+    environment:
+      POSTGRES_DB: urban_mobility
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres   # solo para desarrollo local
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+volumes:
+  mongo_data:
+  pg_data:
